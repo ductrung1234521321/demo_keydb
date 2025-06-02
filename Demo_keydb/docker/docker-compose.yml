@@ -1,0 +1,98 @@
+services:
+  keydb1:
+    image: eqalpha/keydb
+    container_name: keydb1
+    ports:
+      - "6383:6379"
+      - "16383:16379"
+    volumes:
+      - ./keydb1.conf:/etc/keydb/keydb.conf
+    command: keydb-server /etc/keydb/keydb.conf
+    networks:
+      - keydbnet
+
+  keydb2:
+    image: eqalpha/keydb
+    container_name: keydb2
+    ports:
+      - "6380:6379"
+      - "16380:16379"
+    volumes:
+      - ./keydb2.conf:/etc/keydb/keydb.conf
+    command: keydb-server /etc/keydb/keydb.conf
+    networks:
+      - keydbnet
+
+  keydb3:
+    image: eqalpha/keydb
+    container_name: keydb3
+    ports:
+      - "6381:6379"
+      - "16381:16379"
+    volumes:
+      - ./keydb3.conf:/etc/keydb/keydb.conf
+    command: keydb-server /etc/keydb/keydb.conf
+    networks:
+      - keydbnet
+
+  # Thêm 3 node dự phòng
+  keydb4:
+    image: eqalpha/keydb
+    container_name: keydb4
+    ports:
+      - "6384:6379"
+      - "16384:16379"
+    volumes:
+      - ./keydb4.conf:/etc/keydb/keydb.conf
+    command: keydb-server /etc/keydb/keydb.conf
+    networks:
+      - keydbnet
+
+  keydb5:
+    image: eqalpha/keydb
+    container_name: keydb5
+    ports:
+      - "6385:6379"
+      - "16385:16379"
+    volumes:
+      - ./keydb5.conf:/etc/keydb/keydb.conf
+    command: keydb-server /etc/keydb/keydb.conf
+    networks:
+      - keydbnet
+
+  keydb6:
+    image: eqalpha/keydb
+    container_name: keydb6
+    ports:
+      - "6386:6379"
+      - "16386:16379"
+    volumes:
+      - ./keydb6.conf:/etc/keydb/keydb.conf
+    command: keydb-server /etc/keydb/keydb.conf
+    networks:
+      - keydbnet
+
+  springboot-app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: springboot-app
+    ports:
+      - "8080:8080"
+    networks:
+      - keydbnet
+    depends_on:
+      - keydb1
+      - keydb2
+      - keydb3
+      - keydb4
+      - keydb5
+      - keydb6
+    command: >
+      java -jar /app.jar
+      --debug
+      --logging.level.com.example.demo_keydb=DEBUG
+
+networks:
+  keydbnet:
+    driver: bridge

@@ -1,0 +1,58 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.4.5'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'com.example'
+version = '0.0.1-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+configurations {
+    compileOnly {
+        extendsFrom annotationProcessor
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-websocket'      // <== Thêm dòng này
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'     // <== Thêm dòng này
+    // Lettuce để kết nối với KeyDB
+    implementation 'io.lettuce:lettuce-core:6.6.0.RELEASE'
+
+    // Lombok cho việc giảm thiểu boilerplate code
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    // Để chạy các tests
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    // Spring Boot Docker Compose (nếu cần thiết)
+    developmentOnly 'org.springframework.boot:spring-boot-docker-compose'
+
+    // Swagger
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.2.0'
+
+    // chatgpt
+    implementation 'com.theokanning.openai-gpt3-java:client:0.12.0' // official Java client cho OpenAI
+    implementation 'com.squareup.okhttp3:okhttp:4.11.0'         // nếu bạn chưa có
+
+    // THÊM DÒNG NÀY VÀO:
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}

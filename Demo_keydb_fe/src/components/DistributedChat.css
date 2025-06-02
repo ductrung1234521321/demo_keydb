@@ -1,0 +1,8 @@
+.chat-wrapper {
+  min-height: 100vh;
+  min-width: 100vw;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(120deg, #dec0f9 70%, #e7dbf7 100%);
+}

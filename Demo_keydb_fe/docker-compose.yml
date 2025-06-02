@@ -1,0 +1,12 @@
+# docker-compose.yml
+version: '3.8'
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - '5173:80'
+    environment:
+      # Đưa URL backend đang chạy ra biến môi trường cho Vite
+      - VITE_API_URL=http://host.docker.internal:8080
