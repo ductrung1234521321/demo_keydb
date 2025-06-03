@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import './DistributedChat.css';
+import './DistributedChat.css'
 
-// Đổi đúng IP backend máy bạn!
 const API_BASE = 'http://localhost:8080';
 
 export default function DistributedChat() {
@@ -15,50 +14,80 @@ export default function DistributedChat() {
   const [sendingMsg, setSendingMsg] = useState('');
   const [sending, setSending] = useState(false);
   const [historyMessages, setHistoryMessages] = useState([]);
+  const [isResetting, setIsResetting] = useState(false);
+  const [resetTTL, setResetTTL] = useState(0);
   const messagesEndRef = useRef(null);
 
-  // Cuộn xuống cuối mỗi khi historyMessages thay đổi
+  // Scroll tới cuối khi có message mới
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [historyMessages]);
 
+  // Poll trạng thái reset + messages
+  useEffect(() => {
+    let interval;
+    if (step === 3 && chatInfo?.channel) {
+      interval = setInterval(async () => {
+        // Poll reset TTL
+        try {
+          const res = await fetch(`${API_BASE}/messages/channel/${encodeURIComponent(chatInfo.channel)}/reset-ttl`);
+          if (res.ok) {
+            const ttl = await res.json();
+            setIsResetting(ttl > 0);
+            setResetTTL(ttl);
+          }
+        } catch {//
+          }
+        // Poll message list
+        try {
+          const res = await fetch(`${API_BASE}/messages/${encodeURIComponent(chatInfo.channel)}/messages`);
+          if (res.ok) {
+            const history = await res.json();
+            setHistoryMessages(history);
+          }
+        } catch {//
+          }
+      }, 3000);
+    }
+    return () => clearInterval(interval);
+  }, [step, chatInfo]);
+
+  // B1: Login
   const handleStart = async () => {
     if (!user.trim()) return;
     try {
       const res = await fetch(`${API_BASE}/messages/user/${encodeURIComponent(user)}/channels`);
-      if (!res.ok) throw new Error('Lỗi API');
-      const contentType = res.headers.get("content-type");
-      if (!contentType || !contentType.includes("application/json")) throw new Error('Không phải JSON');
+      if (!res.ok) throw new Error('API Error');
       const channels = await res.json();
       setChannelsJoined(channels);
       setStep(2);
-    } catch (err) {
+    } catch  {
       alert('Không lấy được danh sách kênh, vui lòng thử lại.');
-      console.error(err);
     }
   };
 
+  // Join channel mới
   const handleJoinChannel = async () => {
     const channel = newChannel.trim();
     if (!channel) return alert("Nhập tên channel để join");
     const res = await fetch(`${API_BASE}/messages/${encodeURIComponent(channel)}/join/${encodeURIComponent(user)}`, { method: 'POST' });
     if (res.ok) {
-      alert("Đã join channel " + channel);
       setSelectedChannel(channel);
       const channels = await (await fetch(`${API_BASE}/messages/user/${encodeURIComponent(user)}/channels`)).json();
       setChannelsJoined(channels);
+      setNewChannel('');
     } else {
       alert("Lỗi join channel");
     }
   };
 
+  // Leave channel
   const handleLeaveChannel = async () => {
     if (!selectedChannel) return alert("Chọn channel muốn leave");
     const res = await fetch(`${API_BASE}/messages/${encodeURIComponent(selectedChannel)}/leave/${encodeURIComponent(user)}`, { method: 'POST' });
     if (res.ok) {
-      alert("Đã rời channel " + selectedChannel);
       const channels = await (await fetch(`${API_BASE}/messages/user/${encodeURIComponent(user)}/channels`)).json();
       setChannelsJoined(channels);
       setSelectedChannel('');
@@ -67,12 +96,12 @@ export default function DistributedChat() {
     }
   };
 
+  // Xóa channel
   const handleDeleteChannel = async () => {
     if (!selectedChannel) return alert("Chọn channel muốn xóa");
     if (!window.confirm(`Bạn chắc chắn muốn xóa channel "${selectedChannel}"?`)) return;
     const res = await fetch(`${API_BASE}/messages/channel/${encodeURIComponent(selectedChannel)}`, { method: 'DELETE' });
     if (res.ok) {
-      alert("Đã xóa channel " + selectedChannel);
       const channels = await (await fetch(`${API_BASE}/messages/user/${encodeURIComponent(user)}/channels`)).json();
       setChannelsJoined(channels);
       setSelectedChannel('');
@@ -81,24 +110,27 @@ export default function DistributedChat() {
     }
   };
 
+  // Vào chat channel
   const handleEnterChat = async (channel) => {
     try {
       const nodeRes = await fetch(`${API_BASE}/messages/user/${encodeURIComponent(user)}/node-info`);
       const nodeInfo = nodeRes.ok ? await nodeRes.text() : '';
       const hisRes = await fetch(`${API_BASE}/messages/${encodeURIComponent(channel)}/messages`);
       const history = hisRes.ok ? await hisRes.json() : [];
-
       setChatInfo({ nodeInfo, channel });
       setHistoryMessages(history);
       setStep(3);
-    } catch (err) {
+      setIsResetting(false);
+      setResetTTL(0);
+    } catch  {
       alert('Lỗi lấy lịch sử chat');
-      console.error(err);
     }
   };
 
+  // Gửi tin nhắn
   const handleSendMessage = async (e) => {
     e.preventDefault();
+    if (isResetting) return alert("Channel đang được reset, không gửi được tin nhắn!");
     if (!sendingMsg.trim() || !chatInfo?.channel) return;
     setSending(true);
     try {
@@ -109,71 +141,79 @@ export default function DistributedChat() {
       });
       if (!res.ok) throw new Error('Gửi tin thất bại');
       setSendingMsg('');
-      // Reload lịch sử tin nhắn sau khi gửi
+      // Reload lịch sử
       const hisRes = await fetch(`${API_BASE}/messages/${encodeURIComponent(chatInfo.channel)}/messages`);
-      const history = hisRes.ok ? await hisRes.json() : [];
-      setHistoryMessages(history);
+      setHistoryMessages(hisRes.ok ? await hisRes.json() : []);
     } catch {
       alert('Gửi tin nhắn thất bại!');
     }
     setSending(false);
   };
 
-  const handleResetChannel = async () => {
-    if (!chatInfo?.channel) return;
-    const admin = user.trim();
-    if (!admin) {
-      alert("User chưa được đăng nhập hợp lệ!");
-      return;
-    }
-    if (!window.confirm(`Bạn có chắc chắn muốn reset lại channel "${chatInfo.channel}"?`)) return;
-
+  // Xóa message
+  const handleDeleteMessage = async (messageId) => {
+    if (!window.confirm("Bạn có chắc muốn xóa tin nhắn này?")) return;
     try {
-      const res = await fetch(`${API_BASE}/messages/channel/${encodeURIComponent(chatInfo.channel)}/reset?admin=${encodeURIComponent(admin)}`, {
-        method: 'POST'
-      });
+      const res = await fetch(`${API_BASE}/messages/${encodeURIComponent(user)}/messages/${encodeURIComponent(messageId)}`, { method: 'DELETE' });
       if (res.ok) {
-        const text = await res.text();
-        alert(text);
-        setHistoryMessages([]); // Clear message sau reset
-      } else if (res.status === 409) {
-        const text = await res.text();
-        alert(text);
-      } else {
-        alert("Reset channel thất bại, vui lòng thử lại.");
+        // Xóa thành công thì reload lại lịch sử chat
+        const hisRes = await fetch(`${API_BASE}/messages/${encodeURIComponent(chatInfo.channel)}/messages`);
+        setHistoryMessages(hisRes.ok ? await hisRes.json() : []);
       }
-    } catch (err) {
-      alert("Lỗi khi gọi API reset channel.");
-      console.error(err);
+    } catch {
+      alert("Không thể xóa tin nhắn, thử lại!");
     }
   };
 
-  // Polling lấy tin nhắn mới sau mỗi 4 giây
-  useEffect(() => {
-    if (step === 3 && chatInfo?.channel) {
-      const interval = setInterval(async () => {
-        try {
-          const res = await fetch(`${API_BASE}/messages/${encodeURIComponent(chatInfo.channel)}/messages`);
-          if (res.ok) {
-            const history = await res.json();
-            setHistoryMessages(history);
-          }
-        } catch (err) {
-          console.error('Lỗi polling tin nhắn:', err);
-        }
-      }, 4000);
-      return () => clearInterval(interval);
+  // Reset channel
+ // Khi nhấn Reset channel
+const handleResetChannel = async () => {
+  if (!chatInfo?.channel) return;
+  if (!window.confirm(`Bạn có chắc chắn muốn reset lại channel "${chatInfo.channel}"?`)) return;
+  try {
+    const res = await fetch(`${API_BASE}/messages/channel/${encodeURIComponent(chatInfo.channel)}/reset?admin=${encodeURIComponent(user)}`, { method: 'POST' });
+    if (res.ok) {
+      // Nếu lấy được lock và reset thành công
+      alert("Bạn đã acquire lock thành công! Channel sẽ được reset trong 10 giây...");
+      setHistoryMessages([]);
+      setIsResetting(false);
+      setResetTTL(0);
+    } else if (res.status === 409) {
+      // Không acquire được lock do người khác đang reset
+      const text = await res.text();
+      setIsResetting(true);
+      // Parse TTL còn lại từ response text
+      const match = text.match(/TTL còn: (\d+)/);
+      if (match) setResetTTL(Number(match[1]));
+      alert("Có người khác đang reset channel này!\n" + text);
+    } else {
+      alert("Reset channel thất bại, vui lòng thử lại.");
     }
-  }, [step, chatInfo]);
+  } catch {
+    alert("Lỗi khi gọi API reset channel.");
+  }
+};
 
-  const handleBack = () => {
+
+  // Quay lại danh sách channel
+  const handleBackToChannelList = () => {
     setStep(2);
     setHistoryMessages([]);
     setChatInfo(null);
     setSendingMsg('');
+    setIsResetting(false);
+    setResetTTL(0);
+  };
+  // Quay lại login
+  const handleBackToLogin = () => {
+    setStep(1);
+    setUser('');
+    setChannelsJoined([]);
+    setSelectedChannel('');
+    setNewChannel('');
   };
 
-  // Render UI
+  // UI step 1: Login
   if (step === 1) {
     return (
       <div className="chat-wrapper">
@@ -218,6 +258,7 @@ export default function DistributedChat() {
     );
   }
 
+  // UI step 2: Chọn/join/leave/xóa kênh
   if (step === 2) {
     return (
       <div className="chat-wrapper">
@@ -325,11 +366,19 @@ export default function DistributedChat() {
               margin: "10px 0 0 0", transition: "all 0.18s"
             }}
           >Vào khung chat</button>
+          <button
+            type="button"
+            onClick={handleBackToLogin}
+            style={{
+              marginTop: 16, background: "transparent", color: "#ab72c4", border: "none", fontWeight: 600, cursor: "pointer"
+            }}
+          >← Đăng xuất / Đổi user</button>
         </motion.div>
       </div>
     );
   }
 
+  // UI các step giữ nguyên, riêng step 3 (chat) sẽ thay đổi phần message như sau:
   if (step === 3 && chatInfo) {
     return (
       <div className="chat-wrapper">
@@ -345,6 +394,17 @@ export default function DistributedChat() {
             <span>🟣 <b>{user}</b> | {chatInfo.nodeInfo}</span>
             <div style={{ color: '#c17ae6', fontWeight: 500 }}>Channel: <b>{chatInfo.channel}</b></div>
           </div>
+         {isResetting && (
+  <div style={{
+    background: "#ffe6a1", color: "#c49000", padding: "10px 18px", borderRadius: 16,
+    marginBottom: 10, textAlign: "center", fontWeight: 700, fontSize: "1.09em"
+  }}>
+    <span>
+      🔒 Channel đang bị reset bởi user khác.<br />
+      Vui lòng đợi {resetTTL > 0 ? `${resetTTL} giây` : ''} rồi thử lại chức năng reset/gửi tin!
+    </span>
+  </div>
+)}
 
           <div style={{
             flex: "1 1 auto", minHeight: 200, maxHeight: 320, overflowY: "auto",
@@ -359,7 +419,7 @@ export default function DistributedChat() {
                   : '';
                 const key = `${msg.user}_${msg.timestamp}_${idx}`;
                 return (
-                  <div key={key} style={{ marginBottom: 8, textAlign: isMe ? "right" : "left" }}>
+                  <div key={key} style={{ marginBottom: 8, textAlign: isMe ? "right" : "left", position: "relative" }}>
                     <span style={{
                       background: isMe ? "#dec0f9" : "#eee6fc",
                       color: "#8e44ad",
@@ -376,6 +436,16 @@ export default function DistributedChat() {
                       </span>
                       <br />
                       {msg.msg}
+                      {isMe && msg.id &&
+                        <button
+                          onClick={() => handleDeleteMessage(msg.id)}
+                          style={{
+                            marginLeft: 10, color: "#b94c6b", background: "transparent",
+                            border: "none", cursor: "pointer", fontWeight: 700, fontSize: "0.98em"
+                          }}
+                          title="Xóa tin nhắn này"
+                        >✖</button>
+                      }
                     </span>
                   </div>
                 );
@@ -394,39 +464,49 @@ export default function DistributedChat() {
                 flex: 1, padding: "0.8em 1em", fontSize: "1em",
                 borderRadius: 13, border: "1.2px solid #ca97eb", background: "#faf7fd", color: "#7c44a8"
               }}
-              disabled={sending}
+              disabled={sending || isResetting}
             />
             <button
               type="submit"
               style={{
                 padding: "0.7em 1.35em", borderRadius: 13, border: "none", fontWeight: 700,
-                background: "linear-gradient(90deg, #c27be2 0%, #8e44ad 100%)", color: "#fff", cursor: "pointer"
+                background: "linear-gradient(90deg, #c27be2 0%, #8e44ad 100%)", color: "#fff", cursor: isResetting ? "not-allowed" : "pointer"
               }}
-              disabled={sending}
+              disabled={sending || isResetting}
             >Gửi</button>
 
             <button
               type="button"
               onClick={handleResetChannel}
+              disabled={isResetting}
               style={{
                 padding: "0.7em 1.35em", borderRadius: 13, border: "none", fontWeight: 700,
-                background: "#eb4d5c", color: "#fff", cursor: "pointer"
+                background: isResetting ? "#e2c5cc" : "#eb4d5c", color: "#fff", cursor: isResetting ? "not-allowed" : "pointer"
               }}
             >Reset channel</button>
 
             <button
               type="button"
-              onClick={handleBack}
+              onClick={handleBackToChannelList}
               style={{
                 padding: "0.7em 1.35em", border: "none", fontWeight: 700,
                 background: "#ececec", color: "#b95be0", marginLeft: 3, cursor: "pointer"
               }}
-            >← Trở lại</button>
+            >← Quay lại</button>
           </form>
+          <button
+            type="button"
+            onClick={handleBackToLogin}
+            style={{
+              marginTop: 16, background: "transparent", color: "#ab72c4", border: "none", fontWeight: 600, cursor: "pointer"
+            }}
+          >← Đăng xuất / Đổi user</button>
         </motion.div>
       </div>
     );
   }
+
+  // Các step 1, 2 giữ như cũ, chỉ thêm nút “Quay lại đăng nhập” ở step 2 nếu muốn.
 
   return null;
 }
