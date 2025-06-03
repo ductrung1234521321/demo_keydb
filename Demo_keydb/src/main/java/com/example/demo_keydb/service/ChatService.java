@@ -51,6 +51,7 @@ public class ChatService {
 
 
 
+
     //Read all message of user
     public List<Map<String,String>> getAllMessagesOfUser (String user){
         return sync.xrange("stream:user:{"+user+"}:message", Range.create("-","+"))
@@ -146,13 +147,18 @@ public class ChatService {
         long startTime = System.currentTimeMillis();
         String token = null;
 
+        System.out.println("Bắt đầu vòng lặp chờ lock...");
+
         // Vòng lặp chờ lock
         while (token == null && System.currentTimeMillis() - startTime < waitTimeoutMs) {
             token = lockService.acquireLock(lockKey, ttlMs);
+            System.out.println("Thử acquireLock: " + token);
             if (token == null) {
                 try {
+                    System.out.println("Chưa lấy được lock, ngủ 1s rồi thử lại...");
                     Thread.sleep(1000); // chờ 1 giây rồi thử lại
                 } catch (InterruptedException e) {
+                    System.out.println("Thread bị interrupt khi chờ lock!");
                     Thread.currentThread().interrupt();
                     break;
                 }
@@ -160,40 +166,54 @@ public class ChatService {
         }
 
         if (token == null) {
+            System.out.println("Không lấy được lock sau " + (System.currentTimeMillis() - startTime) + "ms.");
             return false; // Không lấy được lock sau thời gian chờ
         }
 
         try {
+            System.out.println("Đã acquire lock, set cờ reset và ngủ 10s...");
             // Đặt cờ reset (expire 15 giây)
             sync.setex("resetting:{" + channel + "}", ttlMs / 1000, "true");
 
             // Delay thêm 10 giây để giữ hàm chạy lâu
             Thread.sleep(10000);
 
+            System.out.println("Bắt đầu xóa message...");
             // Xóa toàn bộ message như cũ
             Set<String> users = sync.keys("set:user:*:channels").stream()
                     .filter(userKey -> sync.sismember(userKey, channel))
                     .map(userKey -> userKey.split(":")[2].replace("{", "").replace("}", ""))
                     .collect(Collectors.toSet());
 
+            System.out.println("Danh sách user sẽ xóa message: " + users);
+
             for (String user : users) {
                 List<StreamMessage<String, String>> messages = sync.xrange("stream:user:{" + user + "}:message", Range.create("-", "+"));
                 for (StreamMessage<String, String> message : messages) {
                     if (channel.equals(message.getBody().get("channel"))) {
+                        System.out.println("Xóa message: " + message.getId() + " của user: " + user);
                         sync.xdel("stream:user:{" + user + "}:message", message.getId());
                     }
                 }
             }
+            System.out.println("Xóa message xong.");
             return true;
         } catch (InterruptedException e) {
+            System.out.println("Thread bị interrupt khi sleep!");
             Thread.currentThread().interrupt();
             return false;
+        } catch (Exception ex) {
+            System.out.println("Có lỗi xảy ra: " + ex.getMessage());
+            ex.printStackTrace();
+            return false;
         } finally {
+            System.out.println("Xóa cờ reset và giải phóng lock.");
             // Xóa cờ reset (an toàn phòng expire chưa hết)
             sync.del("resetting:{" + channel + "}");
             lockService.releaseLock(lockKey, token);
         }
     }
+
 
     public Long getResetLockTTL(String channel) {
         return sync.ttl("resetting:{" + channel + "}");
